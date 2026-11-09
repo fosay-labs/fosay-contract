@@ -1,0 +1,20 @@
+[package]
+name = "fosay-mandate-policy"
+description = "FOSAY mandate policy: per-tx cap, rolling budget, recipient allowlist and pause for an AI agent's rule on an OpenZeppelin smart account."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+version.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+doctest = false
+
+[dependencies]
+soroban-sdk = { workspace = true }
+stellar-accounts = { workspace = true }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }
+ed25519-dalek = { workspace = true }
