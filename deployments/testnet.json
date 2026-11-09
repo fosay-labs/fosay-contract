@@ -1,0 +1,29 @@
+{
+  "network": "testnet",
+  "rpcUrl": "https://soroban-testnet.stellar.org",
+  "networkPassphrase": "Test SDF Network ; September 2015",
+  "deployedAt": "2026-11-09T16:33:35.805Z",
+  "sourceCommit": "d0bb63f",
+  "deployer": "GDVL7NKT57BXD5HET2UYAPOQRRWP3Z7ZXREI7JPQT5LFWWJPO75E7EKF",
+  "contracts": {
+    "mandatePolicy": {
+      "crate": "fosay-mandate-policy",
+      "id": "CABMDEJEXOIBR4F6TDIYQ7CA5GFENXAYDRA4WH7V4QR7PAMTFIEQWWQ5",
+      "wasmHash": "46336ed2e9d1f05b82b7331309fd5c6123727f70d20120a14e5898a1ba39cd70",
+      "uploadTx": "c6f8eb6fe9e59ec314391600882fe07006787e471bb638eae5fc50ceed6d5b8c",
+      "deployTx": "f9182840c5138a77b6eba56ec690fa000b456d11263ad539acf749dfab5b4871"
+    },
+    "approvals": {
+      "crate": "fosay-approvals",
+      "id": "CAZDF7XQSKLZK5JG4FPCG6ZSGK3C4ZGNBKHU3VYDPQSZWLX2HPRXJCIU",
+      "wasmHash": "867499c4eece48777833fc28d58e63c5f904dbc7c1d73c1a043c72cc24f44fe2",
+      "uploadTx": "be16fdba30699078bdb65ede3baafdf3d5e7572906ab9b4be31ad14aecc091de",
+      "deployTx": "bf2aaab7a5c11707815ebd3b1a6700cdc2622f64ee40ec79ffb4887cf1978dd7"
+    }
+  },
+  "canonical": {
+    "accountWasmHash": "c514d35ea67eaea9bfc1fb3327854c0c06111bc1ddebd4fe217c504c1004b9e1",
+    "webauthnVerifier": "CC7EKIHQP3TN4CARQDND6CEOY2UXLWWC2X5GHTD5NLAT7BG5GPZIOM3F",
+    "ed25519Verifier": "CAAVTMCBXEIBPR64EAASKFXERVPYFZA2JYP5A3BG6PESWEFUJX5IHKN4"
+  }
+}

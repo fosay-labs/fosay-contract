@@ -1,0 +1,82 @@
+{
+  "network": "testnet",
+  "at": "2026-11-09T16:43:26.108Z",
+  "contracts": {
+    "POLICY": "CABMDEJEXOIBR4F6TDIYQ7CA5GFENXAYDRA4WH7V4QR7PAMTFIEQWWQ5",
+    "APPROVALS": "CAZDF7XQSKLZK5JG4FPCG6ZSGK3C4ZGNBKHU3VYDPQSZWLX2HPRXJCIU"
+  },
+  "steps": [
+    {
+      "name": "connect agent (2 owner signatures)",
+      "wallet": "CAXJ2MCGMKDJLRYWQAYKTM5SP6AS7MAMIK42JXCGD3R6HXGXT6NVYEAH",
+      "payRule": 1,
+      "askRule": 2,
+      "payRuleFee": 771801,
+      "askRuleFee": 92505
+    },
+    {
+      "name": "mandate installed",
+      "token": "CCOQTBOEEASOND4URQ63W2NDRV7B5JFOYQIG3XE4OQBVLGUGTQCFGGQT",
+      "budget": "50000000",
+      "max_per_tx": "20000000",
+      "period_ledgers": 17280
+    },
+    {
+      "name": "cold payment cost before keeper (not submitted)",
+      "minResourceFee": 311366
+    },
+    {
+      "name": "keeper extended footprint TTL to 31 days",
+      "hash": "30666e6195e14901de01aa900bfa4705edf2bd69d327d45e07a930d513557647",
+      "entries": 12,
+      "feeCharged": 412174
+    },
+    {
+      "name": "x402 payment 1 (2 FUSD) verified + settled at default 50k ceiling",
+      "minResourceFee": 18959,
+      "feeCharged": 13971,
+      "tx": "865b0925d0569825d502fd0cb2cc6a5e2a11e6380bd30c3f3039a81a31d4b801",
+      "settled": true
+    },
+    {
+      "name": "x402 payment 2 (2 FUSD) verified + settled at default 50k ceiling",
+      "minResourceFee": 18959,
+      "feeCharged": 13971,
+      "tx": "3d11a360c3aae7da0e60fcc5df8c0f91fbea306e9706a672942699e7e1f1aca5",
+      "settled": true
+    },
+    {
+      "name": "remaining budget after payments",
+      "remaining": "10000000"
+    },
+    {
+      "name": "3 FUSD payment (over 2 FUSD per-tx cap) refused",
+      "refused": true,
+      "contractErrors": [
+        4107
+      ]
+    },
+    {
+      "name": "1.5 FUSD payment (over remaining budget) refused",
+      "refused": true,
+      "contractErrors": [
+        4109
+      ]
+    },
+    {
+      "name": "agent proposes (signed with smart-account-kit, :ask rule)",
+      "intentId": "3",
+      "feeCharged": 409852
+    },
+    {
+      "name": "owner approves execute(id) with rule ids [0, 0]",
+      "status": [
+        "Executed"
+      ],
+      "merchantReceived": "15000000",
+      "feeCharged": 15624,
+      "minResourceFee": 20697,
+      "tx": "5a677316b45aab78336aac1666e7b9eb295f9cfa4f718455511314f5ae42636d"
+    }
+  ]
+}
