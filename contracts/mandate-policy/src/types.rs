@@ -50,7 +50,7 @@ pub struct MandateData {
     pub recipients: Vec<Address>,
     pub mandate_hash: BytesN<32>,
     pub paused: bool,
-    /// Live budget buckets; at most `BUCKETS + 1` entries.
+    /// Budget ring: exactly `BUCKETS + 1` slots, fixed at install (constant entry size).
     pub buckets: Vec<Bucket>,
 }
 

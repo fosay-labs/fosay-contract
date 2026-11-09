@@ -46,7 +46,8 @@ fn install_stores_mandate_and_emits_event() {
     assert_eq!(m.period_ledgers, 1_000);
     assert_eq!(m.max_per_tx, 2 * UNIT);
     assert!(!m.paused);
-    assert!(m.buckets.is_empty());
+    assert_eq!(m.buckets.len(), crate::budget::SLOTS);
+    assert!(m.buckets.iter().all(|b| b.amount == 0));
     assert_eq!(
         w.policy_client().remaining_budget(&w.account, &w.pay_rule),
         5 * UNIT

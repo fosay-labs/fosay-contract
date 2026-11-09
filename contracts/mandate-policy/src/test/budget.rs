@@ -1,11 +1,11 @@
-//! Budget math unit tests and the rolling-window property test.
+//! Budget ring unit tests and the rolling-window property test.
 
 extern crate std;
 
-use soroban_sdk::{vec, Env, Vec};
+use soroban_sdk::{Env, Vec};
 
 use crate::{
-    budget::{bucket_len, current_index, prune, record, spent},
+    budget::{bucket_len, current_index, empty_ring, record, spent, SLOTS},
     types::{Bucket, BUCKETS},
 };
 
@@ -27,63 +27,62 @@ fn current_index_divides_by_bucket_len() {
 }
 
 #[test]
-fn prune_keeps_current_and_previous_buckets() {
+fn empty_ring_has_fixed_zeroed_slots() {
     let e = Env::default();
-    let b = |index, amount| Bucket { index, amount };
-    let buckets = vec![&e, b(1, 1), b(2, 2), b(10, 3), b(11, 4), b(12, 5)];
-    // idx 12 keeps indices >= 4
-    let live = prune(&e, &buckets, 12);
-    assert_eq!(live, vec![&e, b(10, 3), b(11, 4), b(12, 5)]);
-    // boundary: idx 10 keeps indices >= 2
-    assert_eq!(prune(&e, &buckets, 10).len(), 4);
-    // idx below BUCKETS saturates at 0 and keeps everything
-    assert_eq!(prune(&e, &buckets, 3).len(), 5);
+    let ring = empty_ring(&e);
+    assert_eq!(ring.len(), SLOTS);
+    assert_eq!(SLOTS, BUCKETS + 1);
+    assert_eq!(spent(&ring, 500), Some(0));
 }
 
 #[test]
-fn record_merges_same_bucket_and_appends_new() {
+fn record_merges_same_bucket_and_overwrites_stale_slot() {
     let e = Env::default();
-    let empty: Vec<Bucket> = Vec::new(&e);
-    let one = record(&e, &empty, 5, 10).unwrap();
-    let merged = record(&e, &one, 5, 7).unwrap();
+    let ring = record(&empty_ring(&e), 20, 10).unwrap();
+    let ring = record(&ring, 20, 7).unwrap();
     assert_eq!(
-        merged,
-        vec![
-            &e,
-            Bucket {
-                index: 5,
-                amount: 17
-            }
-        ]
+        ring.get(20 % SLOTS).unwrap(),
+        Bucket {
+            index: 20,
+            amount: 17
+        }
     );
-    let two = record(&e, &merged, 6, 1).unwrap();
-    assert_eq!(two.len(), 2);
-    assert_eq!(spent(&two), Some(18));
+    assert_eq!(spent(&ring, 20), Some(17));
+    // index 29 maps to the same slot as 20 (29 % 9 == 20 % 9) and 20 is stale by then
+    let ring = record(&ring, 29, 1).unwrap();
+    assert_eq!(
+        ring.get(29 % SLOTS).unwrap(),
+        Bucket {
+            index: 29,
+            amount: 1
+        }
+    );
+    assert_eq!(spent(&ring, 29), Some(1));
+    assert_eq!(ring.len(), SLOTS);
 }
 
 #[test]
-fn overflow_returns_none() {
+fn spent_counts_only_the_live_window() {
     let e = Env::default();
-    let full = vec![
-        &e,
-        Bucket {
-            index: 1,
-            amount: i128::MAX,
-        },
-    ];
-    assert_eq!(record(&e, &full, 1, 1), None);
-    let two = vec![
-        &e,
-        Bucket {
-            index: 1,
-            amount: i128::MAX,
-        },
-        Bucket {
-            index: 2,
-            amount: 1,
-        },
-    ];
-    assert_eq!(spent(&two), None);
+    let mut ring = empty_ring(&e);
+    for idx in 10..=18u32 {
+        ring = record(&ring, idx, 1).unwrap();
+    }
+    assert_eq!(spent(&ring, 18), Some(9)); // 10..=18 all live
+    assert_eq!(spent(&ring, 19), Some(8)); // 10 left the window
+    assert_eq!(spent(&ring, 30), Some(0));
+    assert_eq!(spent(&ring, 5), Some(0)); // future buckets never count for an earlier idx
+}
+
+#[test]
+fn overflow_and_malformed_ring_return_none() {
+    let e = Env::default();
+    let ring = record(&empty_ring(&e), 3, i128::MAX).unwrap();
+    assert_eq!(record(&ring, 3, 1), None);
+    let ring = record(&ring, 4, 1).unwrap();
+    assert_eq!(spent(&ring, 4), None);
+    let short: Vec<Bucket> = Vec::new(&e);
+    assert_eq!(record(&short, 1, 1), None);
 }
 
 /// Deterministic xorshift so the property test needs no extra dependencies.
@@ -101,8 +100,8 @@ impl Rng {
 }
 
 /// Replays the enforce algorithm over random sequences and checks, by brute force over
-/// the accepted history, that no `period`-long window ever exceeds `budget`. Also checks
-/// the bucket list never grows past `BUCKETS + 1`.
+/// the accepted history, that no `period`-long window ever exceeds `budget`, and that the
+/// ring keeps exactly `SLOTS` entries.
 #[test]
 fn rolling_window_never_exceeds_budget() {
     let mut rng = Rng(0x9E37_79B9_7F4A_7C15);
@@ -112,25 +111,20 @@ fn rolling_window_never_exceeds_budget() {
             let e = Env::default();
             e.cost_estimate().budget().reset_unlimited();
             let budget: i128 = 1 + rng.below(1_000) as i128;
-            let mut buckets: Vec<Bucket> = Vec::new(&e);
+            let mut ring = empty_ring(&e);
             let mut accepted: std::vec::Vec<(u32, i128)> = std::vec::Vec::new();
             let mut ledger: u32 = 1 + rng.below(1_000) as u32;
             for _step in 0..300 {
                 ledger += rng.below(u64::from(period) / 2 + 1) as u32;
                 let amount: i128 = 1 + rng.below(budget as u64) as i128;
                 let idx = current_index(ledger, period);
-                let live = prune(&e, &buckets, idx);
-                assert!(live.len() <= BUCKETS + 1);
-                let s = spent(&live).unwrap();
+                let s = spent(&ring, idx).unwrap();
                 if s + amount <= budget {
-                    buckets = record(&e, &live, idx, amount).unwrap();
-                    assert!(buckets.len() <= BUCKETS + 1);
+                    ring = record(&ring, idx, amount).unwrap();
                     accepted.push((ledger, amount));
-                } else {
-                    buckets = live;
                 }
+                assert_eq!(ring.len(), SLOTS);
             }
-            // brute force: every window [end - period + 1, end] over accepted spends
             for &(end, _) in &accepted {
                 let start = end.saturating_sub(period - 1);
                 let total: i128 = accepted

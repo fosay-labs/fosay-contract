@@ -57,14 +57,13 @@ impl Policy for MandatePolicy {
             panic_with_error!(e, MandateError::RecipientNotAllowed)
         }
         let idx = budget::current_index(e.ledger().sequence(), data.period_ledgers);
-        let live = budget::prune(e, &data.buckets, idx);
-        let after = budget::spent(&live)
+        let after = budget::spent(&data.buckets, idx)
             .and_then(|s| s.checked_add(transfer.amount))
             .unwrap_or_else(|| panic_with_error!(e, MandateError::MathOverflow));
         if after > data.budget {
             panic_with_error!(e, MandateError::BudgetExceeded)
         }
-        data.buckets = budget::record(e, &live, idx, transfer.amount)
+        data.buckets = budget::record(&data.buckets, idx, transfer.amount)
             .unwrap_or_else(|| panic_with_error!(e, MandateError::MathOverflow));
         storage::save(e, &smart_account, context_rule.id, &data);
     }
@@ -100,7 +99,7 @@ impl Policy for MandatePolicy {
             recipients: install_params.recipients,
             mandate_hash: install_params.mandate_hash,
             paused: false,
-            buckets: Vec::new(e),
+            buckets: budget::empty_ring(e),
         };
         storage::save_and_extend(e, &smart_account, context_rule.id, &data);
         events::emit_installed(e, &smart_account, context_rule.id, &data);
@@ -182,7 +181,7 @@ impl MandatePolicy {
             return 0;
         }
         let idx = budget::current_index(e.ledger().sequence(), data.period_ledgers);
-        let spent = budget::spent(&budget::prune(e, &data.buckets, idx))
+        let spent = budget::spent(&data.buckets, idx)
             .unwrap_or_else(|| panic_with_error!(e, MandateError::MathOverflow));
         data.budget.saturating_sub(spent).max(0)
     }

@@ -18,7 +18,8 @@ fn payment_within_limits_succeeds_and_records_spend() {
         3 * UNIT
     );
     let m = w.policy_client().get_mandate(&w.account, &w.pay_rule);
-    assert_eq!(m.buckets.len(), 1);
+    assert_eq!(m.buckets.len(), crate::budget::SLOTS);
+    assert_eq!(m.buckets.iter().map(|b| b.amount).sum::<i128>(), 2 * UNIT);
 }
 
 #[test]
@@ -156,4 +157,28 @@ fn agent_rule_cannot_pay_a_different_token() {
     assert!(soroban_sdk::token::Client::new(&w.e, &other)
         .try_transfer(&w.account, &to, &UNIT)
         .is_err());
+}
+
+/// The bucket ring never changes length, so the stored entry size is constant and
+/// payments never pay rent for growing storage (Phase 8 testnet finding).
+#[test]
+fn mandate_entry_size_is_constant_across_payments() {
+    use soroban_sdk::xdr::{Limits, ScVal, WriteXdr};
+    let w = Wallet::new(1_000 * UNIT, 80, UNIT);
+    let to = Address::generate(&w.e);
+    let size = |w: &Wallet| {
+        let m = w.policy_client().get_mandate(&w.account, &w.pay_rule);
+        let v: ScVal = soroban_sdk::TryFromVal::try_from_val(
+            &w.e,
+            &soroban_sdk::IntoVal::<_, soroban_sdk::Val>::into_val(&m, &w.e),
+        )
+        .unwrap();
+        v.to_xdr(Limits::none()).unwrap().len()
+    };
+    let initial = size(&w);
+    for i in 0..30u32 {
+        assert!(w.agent_pay(&to, UNIT / 10));
+        w.advance(3 + (i % 17)); // crosses many 10-ledger buckets, with gaps
+        assert_eq!(size(&w), initial, "entry size changed after payment {i}");
+    }
 }
