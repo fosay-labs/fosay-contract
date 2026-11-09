@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="320" viewBox="0 0 1280 320" role="img" aria-labelledby="t d">
+  <title id="t">FOSAY</title>
+  <desc id="d">FOSAY: Funds Only Spent After Yes. Agent wallets on Stellar.</desc>
+  <rect width="1280" height="320" fill="#0b0d10"/>
+  <g transform="translate(96 88)">
+    <rect width="144" height="144" rx="32" fill="#16a34a"/>
+    <path d="M40 74 l24 24 l42 -50" fill="none" stroke="#0b0d10" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <text x="288" y="176" font-family="-apple-system, Segoe UI, Helvetica, Arial, sans-serif" font-size="96" font-weight="800" fill="#f3f4f6" letter-spacing="6">FOSAY</text>
+  <text x="292" y="226" font-family="-apple-system, Segoe UI, Helvetica, Arial, sans-serif" font-size="30" fill="#9ca3af"><tspan fill="#16a34a" font-weight="700">F</tspan>unds <tspan fill="#16a34a" font-weight="700">O</tspan>nly <tspan fill="#16a34a" font-weight="700">S</tspan>pent <tspan fill="#16a34a" font-weight="700">A</tspan>fter <tspan fill="#16a34a" font-weight="700">Y</tspan>es</text>
+  <text x="1184" y="280" text-anchor="end" font-family="-apple-system, Segoe UI, Helvetica, Arial, sans-serif" font-size="22" fill="#6b7280">AI-agent smart wallets on Stellar · Soroban</text>
+</svg>
