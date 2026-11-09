@@ -1,6 +1,8 @@
 //! Contract entry points (SPEC §4 "Functions").
 
-use soroban_sdk::{auth::Context, contract, contractimpl, panic_with_error, Address, Env, Vec};
+use soroban_sdk::{
+    auth::Context, contract, contractimpl, panic_with_error, Address, BytesN, Env, Vec,
+};
 use stellar_accounts::{
     policies::Policy,
     smart_account::{ContextRule, Signer},
@@ -112,5 +114,47 @@ impl Policy for MandatePolicy {
         smart_account.require_auth();
         storage::remove(e, &smart_account, context_rule.id);
         events::emit_uninstalled(e, &smart_account, context_rule.id);
+    }
+}
+
+#[contractimpl]
+impl MandatePolicy {
+    /// Pauses or unpauses the mandate (SPEC §4 `set_paused`): freeze / unfreeze the agent.
+    ///
+    /// Auth: `smart_account`. Agent rules never cover this contract (I1), so in practice
+    /// only the owner rule can authorize it.
+    /// Errors: `NotInstalled`. Events: `MandatePaused`.
+    pub fn set_paused(e: &Env, smart_account: Address, context_rule_id: u32, paused: bool) {
+        smart_account.require_auth();
+        let mut data = storage::load_or_panic(e, &smart_account, context_rule_id);
+        data.paused = paused;
+        storage::save_and_extend(e, &smart_account, context_rule_id, &data);
+        events::emit_paused(e, &smart_account, context_rule_id, paused);
+    }
+
+    /// Changes budget, per-tx cap, allowlist and mandate hash (SPEC §4 `update_mandate`).
+    ///
+    /// Keeps `token`, `period_ledgers`, `paused` and the spend already recorded in the
+    /// current window.
+    /// Auth: `smart_account`. Errors: `NotInstalled`, `InvalidParams`.
+    /// Events: `MandateUpdated`.
+    pub fn update_mandate(
+        e: &Env,
+        smart_account: Address,
+        context_rule_id: u32,
+        budget: i128,
+        max_per_tx: i128,
+        recipients: Vec<Address>,
+        mandate_hash: BytesN<32>,
+    ) {
+        smart_account.require_auth();
+        let mut data = storage::load_or_panic(e, &smart_account, context_rule_id);
+        validation::validate_limits(e, budget, max_per_tx, &recipients);
+        data.budget = budget;
+        data.max_per_tx = max_per_tx;
+        data.recipients = recipients;
+        data.mandate_hash = mandate_hash;
+        storage::save_and_extend(e, &smart_account, context_rule_id, &data);
+        events::emit_updated(e, &smart_account, context_rule_id, &data);
     }
 }
