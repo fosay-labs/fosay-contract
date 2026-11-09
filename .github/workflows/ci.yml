@@ -5,6 +5,10 @@ on:
     branches: [main]
   pull_request:
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
 
@@ -22,8 +26,9 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      # default features pull in a keyring that needs system dbus; builds don't need it
       - name: Install Stellar CLI
-        run: cargo install --locked stellar-cli@30.0.1
+        run: cargo install --locked stellar-cli@30.0.1 --no-default-features
 
       - name: Format
         run: cargo fmt --all -- --check
