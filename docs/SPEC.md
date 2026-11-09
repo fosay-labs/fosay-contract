@@ -310,8 +310,8 @@ No function exists that isn't on this list.
 | x402 facilitator accepts a smart-account payer | ✅ when no policy emits events (S1) |
 | Approval bound to `execute(id)` works with an OZ account | ✅ (S2b, fee 12,284) |
 | Smart-account payment cost in steady state | ✅ about the same as a G-account (11,332 vs 10,887) |
-| `fosay-mandate-policy` steady-state cost < 50,000 stroops | ⏳ Phase 8 measurement (acceptance criterion) |
-| Hosted Built-on-Stellar facilitator + real testnet USDC | ⏳ Phase 8 (host not yet allowed in the environment) |
+| `fosay-mandate-policy` steady-state cost < 50,000 stroops | ✅ Phase 8: 18,959 resource fee, settled by the official facilitator at default settings (`docs/DEPLOYMENT.md`) |
+| Hosted Built-on-Stellar facilitator + real testnet USDC | ⏳ not yet (host not allowed in this environment; USDC from a browser faucet) |
 | Owner signing with WebAuthn passkeys end to end | ⏳ `fosay-app` (verifier contract already canonical) |
 | Upstream x402 issue (validate only asset events) | Deferred by decision, 2026-11-09 |
 

@@ -52,13 +52,15 @@ flow: the agent pays, hits its budget, asks; the owner approves, pauses, and rev
 contracts/mandate-policy/   fosay-mandate-policy (policy + tests)
 contracts/approvals/        fosay-approvals (queue + tests, incl. end-to-end)
 tests/fixtures/             canonical OZ smart account and verifier wasm
-docs/                       SPEC, SPIKES, coding-agent system prompt
+docs/                       SPEC, SPIKES, DEPLOYMENT, coding-agent system prompt
+scripts/                    deploy + testnet smoke test (Node)
+deployments/                deployed contract IDs per network
 spikes/                     throwaway testnet scripts behind SPIKES.md
 ```
 
 ## Status
 
-Not audited. Not yet deployed. Testnet deployment and fee measurements are next.
+Not audited. Deployed to **testnet**; IDs and measured costs are in [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
 
 ## License
 
