@@ -529,3 +529,167 @@ Paste the real output in the PR. Read `CONTRIBUTING.md` first.
 BODY
 issue "test(mandate-policy): enforce with a WebAuthn-signed owner context" "wave,tier/high,area/mandate-policy,testing,security-sensitive" "$tmp/12.md"
 
+cat > "$tmp/13.md" <<'BODY'
+## Summary
+
+Make `cargo doc` output useful: a doc comment on every public type, function and error variant, with `#![warn(missing_docs)]` so it stays that way, and publish the generated docs from CI.
+
+## Context
+
+- Crates: `contracts/mandate-policy/src/`, `contracts/approvals/src/`. Many functions already have SPEC references in comments.
+
+## Acceptance criteria
+
+- [ ] `#![warn(missing_docs)]` in both crates with no warnings (clippy runs with `-D warnings`).
+- [ ] CI uploads `target/doc` as an artifact.
+- [ ] Doc comments say who can call each function and which errors it returns.
+
+## Out of scope
+
+- Behaviour changes.
+
+## Tech stack
+
+Rust, soroban-sdk 28.0.0, stellar-accounts 0.8.0 (OpenZeppelin), Stellar CLI 30
+
+## Verify before opening the PR
+
+```bash
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+stellar contract build
+```
+
+Paste the real output in the PR. Read `CONTRIBUTING.md` first.
+
+## Complexity
+
+`tier/trivial`. Claim it by commenting “I'll take this”. A claim with no activity for 7 days goes back to the pool.
+BODY
+issue "docs: rustdoc for every public item and a published cargo doc" "wave,tier/trivial,area/docs,documentation,good first issue" "$tmp/13.md"
+
+cat > "$tmp/14.md" <<'BODY'
+## Summary
+
+Indexers decode `IntentProposed` and friends by position. Add an `EVENT_SCHEMA_VERSION` field to every `fosay-approvals` event (and the mandate-policy admin events) so a future change can't silently break consumers.
+
+## Context
+
+- Events: `contracts/approvals/src/events.rs`, `contracts/mandate-policy/src/events.rs` (never emitted from `enforce`, I7).
+- Consumer: `fosay-app/apps/api/src/indexer/decode.ts`.
+- Contracts are immutable (I4): this ships as a new deployment.
+
+## Acceptance criteria
+
+- [ ] Every event carries `schema_version: 1` in its data.
+- [ ] `enforce` still emits nothing (`i7_agent_payment_emits_only_the_transfer_event` stays green).
+- [ ] Tests assert the field on each event.
+- [ ] SPEC event tables and a fosay-app issue for the decoder update.
+
+## Out of scope
+
+- Deploying the new version.
+
+## Tech stack
+
+Rust, soroban-sdk 28.0.0, stellar-accounts 0.8.0 (OpenZeppelin), Stellar CLI 30
+
+## Verify before opening the PR
+
+```bash
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+stellar contract build
+```
+
+Paste the real output in the PR. Read `CONTRIBUTING.md` first.
+
+## Complexity
+
+`tier/medium`. Claim it by commenting “I'll take this”. A claim with no activity for 7 days goes back to the pool.
+BODY
+issue "feat(approvals): add a schema version to every event" "wave,tier/medium,area/approvals,enhancement" "$tmp/14.md"
+
+cat > "$tmp/15.md" <<'BODY'
+## Summary
+
+`scripts/smoke-testnet.mjs` proves the full flow on testnet by hand. Run the same flow in CI against `stellar/quickstart` (local network) on every pull request: deploy, create a wallet, connect an agent, pay through the x402 facilitator code, propose, execute.
+
+## Context
+
+- Scripts: `scripts/deploy.mjs`, `scripts/smoke-testnet.mjs`, `scripts/lib.mjs`. They read `STELLAR_NETWORK` but only testnet is configured.
+- The canonical OZ account and verifiers must be deployed on the local network from `tests/fixtures/`.
+
+## Acceptance criteria
+
+- [ ] The scripts accept a `local` network (RPC URL and passphrase from env), and deploy the OZ fixtures when missing.
+- [ ] A CI job starts quickstart, runs deploy and the smoke test, and fails on any step.
+- [ ] The job finishes in under 15 minutes.
+
+## Out of scope
+
+- Changing contract code.
+
+## Tech stack
+
+Rust, soroban-sdk 28.0.0, stellar-accounts 0.8.0 (OpenZeppelin), Stellar CLI 30
+
+## Verify before opening the PR
+
+```bash
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+stellar contract build
+```
+
+Paste the real output in the PR. Read `CONTRIBUTING.md` first.
+
+## Complexity
+
+`tier/high`. Claim it by commenting “I'll take this”. A claim with no activity for 7 days goes back to the pool.
+BODY
+issue "test: deploy and smoke-test on a local Stellar network in CI" "wave,tier/high,area/scripts,testing" "$tmp/15.md"
+
+cat > "$tmp/16.md" <<'BODY'
+## Summary
+
+`deployments/testnet.json` records the WASM hash of each deployed contract. Add a CI check that builds the contracts at the recorded source commit and compares hashes, so anyone can confirm the deployed code is this repository's code.
+
+## Context
+
+- Deployment record: `deployments/testnet.json` (`wasmHash`, `sourceCommit`). Toolchain pinned in `rust-toolchain.toml`; Stellar CLI pinned in CI.
+
+## Acceptance criteria
+
+- [ ] A workflow (`workflow_dispatch` + weekly) checks out each `sourceCommit`, runs `stellar contract build`, and compares sha256 with the record.
+- [ ] A mismatch fails the job and prints both hashes.
+- [ ] The README and docs explain how to run the check locally.
+
+## Out of scope
+
+- Changing build settings unless needed for reproducibility (then document it).
+
+## Tech stack
+
+Rust, soroban-sdk 28.0.0, stellar-accounts 0.8.0 (OpenZeppelin), Stellar CLI 30
+
+## Verify before opening the PR
+
+```bash
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+stellar contract build
+```
+
+Paste the real output in the PR. Read `CONTRIBUTING.md` first.
+
+## Complexity
+
+`tier/medium`. Claim it by commenting “I'll take this”. A claim with no activity for 7 days goes back to the pool.
+BODY
+issue "ci: verify the built wasm matches the deployed hash" "wave,tier/medium,area/ci,ci" "$tmp/16.md"
+
