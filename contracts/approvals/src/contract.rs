@@ -1,6 +1,6 @@
 //! Contract entry points (SPEC §5 "Functions").
 
-use soroban_sdk::{contract, contractimpl, panic_with_error, Address, BytesN, Env, String};
+use soroban_sdk::{contract, contractimpl, panic_with_error, token, Address, BytesN, Env, String};
 
 use crate::{
     errors::ApprovalsError,
@@ -89,5 +89,36 @@ impl Approvals {
         storage::set_next_id(e, next);
         events::emit_proposed(e, &intent);
         id
+    }
+
+    /// Approves and pays a pending request (SPEC §5 `execute`): the human says yes.
+    ///
+    /// Auth (I6): `intent.account.require_auth()` is called **before** the transfer, so
+    /// the owner's signed auth entry is rooted at `execute(id)` with the token `transfer`
+    /// as its only sub-invocation. That entry can't be replayed as a bare transfer.
+    /// The owner signs with `context_rule_ids = [owner, owner]`. An agent can only
+    /// execute requests whose nested transfer also passes its `:pay` rule.
+    ///
+    /// Errors: `NotFound`, `NotPending`, `Expired`. Events: `IntentExecuted`.
+    pub fn execute(e: &Env, id: u64) {
+        storage::extend_instance(e);
+        let mut intent = storage::load_intent(e, id);
+        if intent.status != IntentStatus::Pending {
+            panic_with_error!(e, ApprovalsError::NotPending)
+        }
+        if e.ledger().sequence() > intent.expires_ledger {
+            panic_with_error!(e, ApprovalsError::Expired)
+        }
+        intent.account.require_auth();
+        intent.status = IntentStatus::Executed;
+        storage::save_intent(e, &intent);
+        let pending = storage::pending_count(e, &intent.account);
+        storage::set_pending_count(e, &intent.account, pending.saturating_sub(1));
+        token::TokenClient::new(e, &intent.token).transfer(
+            &intent.account,
+            &intent.to,
+            &intent.amount,
+        );
+        events::emit_executed(e, &intent);
     }
 }
