@@ -1,102 +1,145 @@
-# FOSAY — Contract Specification (v0.1)
+# FOSAY — Contract Specification (v0.2)
 
 > **F**unds **O**nly **S**pent **A**fter **Y**es.
 > A wallet you share with your AI agent. Your agent gets its own key with a
-> spending limit you set. Small, in-scope payments go through on their own —
-> the limit you set *is* the yes, given in advance. Anything bigger waits for
-> you to approve it on your phone with your passkey. One tap revokes the agent.
+> spending limit you set. Small, in-scope payments go through on their own:
+> the limit you set *is* the yes, given in advance. Anything bigger waits for you
+> to approve it on your phone with your passkey. One tap revokes the agent.
 
-Status: Phase 5 design. Not yet implemented. Every external dependency below was
-verified against published source on 2026-11-09 (see "Verified facts").
+**Status:** design validated on testnet (see [`SPIKES.md`](./SPIKES.md)); not yet implemented.
+
+**Changes from v0.1** (all driven by the testnet spikes):
+1. The agent's `:pay` rule uses **one** FOSAY policy that also enforces the rolling
+   budget. OZ `spending_limit` is dropped: it emits an event on every payment, which
+   the x402 facilitator rejects, and it costs over the facilitator's fee ceiling (S1, S4).
+2. `fosay-mandate-policy::enforce` emits **no events** and keeps **constant-size** state.
+3. `fosay-approvals::execute` calls `intent.account.require_auth()` **before** the
+   transfer, so the owner's approval is bound to `execute(id)` and can't be replayed
+   as a bare token transfer (S2b).
+4. Payment receipts come from the indexer (tx envelope + transfer event), not from
+   policy events.
+5. A TTL keeper (in `fosay-app`) keeps wallet entries in the cheap steady state.
+6. Connecting an agent is two owner signatures (S3).
 
 ---
 
 ## 1. What FOSAY builds vs. reuses
 
-FOSAY deliberately writes as little security-critical code as possible.
-
 | Piece | Source | FOSAY writes it? |
 |---|---|---|
 | Smart account (wallet) contract | OpenZeppelin `stellar-accounts` v0.8.0, canonical build deployed by `smart-account-kit` (WASM hash `c514d35e…4b9e1`) | **No** |
-| WebAuthn (passkey) verifier | Canonical deployment (smart-account-kit) | **No** |
-| Ed25519 verifier (agent key) | Canonical deployment (smart-account-kit) | **No** |
-| Rolling spending-limit policy | OZ `spending_limit` v0.8.0, canonical deployment | **No** |
-| Wallet deployment / factory | `smart-account-kit` `createWallet` | **No** |
-| **Mandate policy** — per-tx cap, recipient allowlist, pause switch, mandate receipt | — | **Yes** (`fosay-mandate-policy`) |
-| **Approvals queue** — over-limit requests the human approves with a passkey | — | **Yes** (`fosay-approvals`) |
+| WebAuthn (passkey) verifier | Canonical deployment | **No** |
+| Ed25519 verifier (agent key) | Canonical deployment | **No** |
+| Wallet deployment | `smart-account-kit` `createWallet` | **No** |
+| **Mandate policy**: per-tx cap, rolling budget, recipient allowlist, pause, mandate hash | — | **Yes** (`fosay-mandate-policy`) |
+| **Approvals queue**: over-limit requests the human approves with a passkey | — | **Yes** (`fosay-approvals`) |
 
-Two contracts. Neither holds funds. Neither has an admin key.
+Two contracts. Neither holds funds. Neither has an admin key or an upgrade entry point.
 
 ---
 
-## 2. Authorization model (how one wallet is configured)
-
-One user wallet = one OZ smart account with these context rules:
+## 2. Authorization model (one wallet)
 
 | Rule | Context type | Signers | Policies | Purpose |
 |---|---|---|---|---|
-| `owner` (id 0, created by smart-account-kit) | `Default` | `External(webauthn_verifier, owner_passkey)` | none | Owner can do anything: approve, revoke, pause, change limits. **Must never be removed** (OZ caveat: losing the last rule covering the account locks it forever). |
-| `<agent>:pay` | `CallContract(USDC_SAC)` | `External(ed25519_verifier, agent_pubkey)` | OZ `spending_limit` + `fosay-mandate-policy` | Agent pays within limits (x402, MPP charge, direct transfer). `valid_until` = mandate expiry. |
-| `<agent>:ask` | `CallContract(fosay-approvals)` | same agent signer | none (⇒ OZ requires all signers to authenticate) | Agent can open/cancel approval requests. Nothing else. |
+| `owner` (id 0, created by the wallet constructor) | `Default` | `External(webauthn_verifier, owner_passkey)` | none | Owner can do anything: approve, revoke, pause, change limits, upgrade the account. **Must never be removed** (OZ: losing the last rule that covers the account locks it permanently). |
+| `<agent>:pay` | `CallContract(USDC_SAC)` | `External(ed25519_verifier, agent_pubkey)` | `fosay-mandate-policy` only | Agent pays within the mandate (x402, MPP charge, direct transfer). `valid_until` = mandate expiry. |
+| `<agent>:ask` | `CallContract(fosay-approvals)` | same agent signer | none (OZ then requires all signers to authenticate) | Agent can open, cancel, or execute requests. Execute still needs the nested transfer to pass `:pay`. |
 
-Rule names are capped at 20 bytes (`MAX_NAME_SIZE = 20`), e.g. `agt1:pay`, `agt1:ask`.
+Rule names are at most 20 bytes (`MAX_NAME_SIZE = 20`), e.g. `agt1:pay`, `agt1:ask`.
+In every authorization the client supplies one rule id per auth context
+(`AuthPayload.context_rule_ids`), in auth-context order.
 
 ### Security invariants
 
-- **I1.** The agent's key appears only in rules scoped to `USDC_SAC` and `fosay-approvals`. It can never authorize calls to the account itself, to the mandate policy, or to any other contract.
-- **I2.** `fosay-approvals` never moves funds on its own authority. `execute` calls `token.transfer(account, …)`, which needs the account's authorization for *that exact transfer*. An over-limit transfer only passes under the `owner` rule (passkey).
-- **I3.** Because a rule with policies defers signer checks to `enforce()` (OZ: "With policies, full signer validation is deferred to `enforce()`"), `fosay-mandate-policy::enforce` **must** assert that every signer in the rule is in `authenticated_signers`. OZ `spending_limit` only checks non-empty.
-- **I4.** No upgrade or admin entry points in FOSAY contracts. New versions are new deployments.
-- **I5.** The agent's secret key never reaches the FOSAY app or server. Only the public key is registered.
+- **I1.** The agent key appears only in rules scoped to `USDC_SAC` and `fosay-approvals`.
+  It never covers `CallContract(account)`, `CallContract(fosay-mandate-policy)`, or
+  `Default`. So it can't change rules, unpause itself, edit its mandate, or upgrade the account.
+- **I2.** No FOSAY contract moves funds on its own authority. Every token movement is a
+  `transfer(account, …)` that the account authorizes for that exact call.
+- **I3.** A rule with policies defers signer checks to the policies (OZ: "with policies,
+  full signer validation is deferred to `enforce()`"). `fosay-mandate-policy::enforce`
+  **must** assert that every signer of the rule is in `authenticated_signers`. It is
+  the only policy on `:pay`, so nothing else checks this.
+- **I4.** No admin, no upgrade, no owner-settable config in FOSAY contracts. New
+  versions are new deployments.
+- **I5.** The agent's secret key never reaches FOSAY's app or servers. Only its public
+  key is registered.
+- **I6.** An owner approval of a request is bound to `fosay-approvals.execute(id)`. The
+  signed auth entry's root invocation is `execute(id)`, with the `transfer` as its only
+  sub-invocation.
+- **I7.** `fosay-mandate-policy::enforce` emits no events, so payments under `:pay` stay
+  compatible with the x402 Stellar facilitator, which rejects any non-transfer event.
 
 ---
 
-## 3. Dependency graph and deploy order
+## 3. Dependency graph and build order
 
 ```
-                 (external, already deployed)
-   USDC SAC   OZ spending_limit v0.8.0   Ed25519 verifier   WebAuthn verifier
-       ▲               ▲                        ▲                  ▲
-       │               │                        │                  │
-       │        installed on rule        signer identity     signer identity
-       │               │                        │                  │
-  ┌────┴───────────────┴────────────────────────┴──────────────────┴───┐
-  │  per-user OZ smart account (canonical WASM c514d35e…, per-wallet)  │
-  └──────┬───────────────────────────────────────────┬─────────────────┘
-         │ install / enforce / uninstall             │ require_auth (propose/cancel)
-         ▼                                           │ transfer auth (execute)
-  fosay-mandate-policy                         fosay-approvals ──► USDC SAC.transfer
+          (external, already deployed / canonical)
+   USDC SAC     Ed25519 verifier     WebAuthn verifier
+       ▲               ▲                    ▲
+       │        signer identity      signer identity
+  ┌────┴───────────────┴────────────────────┴──────────────────────┐
+  │ per-user OZ smart account (canonical WASM c514d35e…, per wallet)│
+  └──────┬────────────────────────────────────────┬────────────────┘
+         │ install / enforce / uninstall           │ account.require_auth()
+         ▼                                         ▼   (propose / cancel / execute)
+  fosay-mandate-policy                      fosay-approvals ──► USDC SAC.transfer
 ```
 
-- `fosay-mandate-policy` and `fosay-approvals` do not call each other. Deploy in either order.
-- Both must exist before an agent is connected to any wallet.
-- Build: `soroban-sdk = "=28.0.0"`, `stellar-accounts = "=0.8.0"` (0.8.0 requires `soroban-sdk ^28`; do **not** use 29.x yet), target `wasm32v1-none`, Stellar CLI 28.x.
+- The two FOSAY contracts don't call each other. Build, test and deploy them in either order.
+- Both must be deployed before any agent is connected.
+- Toolchain (verified 2026-11-09): Rust stable (1.97 tested), `soroban-sdk = "=28.0.0"`,
+  `stellar-accounts = "=0.8.0"` (needs `soroban-sdk ^28`; don't move to 29.x until
+  `stellar-accounts` supports it), target `wasm32v1-none`. **Wasm builds must go through
+  `stellar contract build`** (Stellar CLI ≥ 25.2.0; 30.0.1 tested): soroban-sdk 28 refuses
+  a plain `cargo build --target wasm32v1-none`. Native `cargo test` works directly.
 
 ---
 
 ## 4. Contract: `fosay-mandate-policy`
 
-Implements OZ `stellar_accounts::policies::Policy`. Multi-tenant: state keyed by
+Implements OZ `stellar_accounts::policies::Policy`. Multi-tenant: state is keyed by
 `(smart_account, context_rule_id)`. One deployment serves every FOSAY wallet.
+
+### Constants
+
+```rust
+pub const BUCKETS: u32 = 8;                 // budget-window granularity
+pub const MAX_RECIPIENTS: u32 = 20;
+pub const MIN_PERIOD_LEDGERS: u32 = BUCKETS; // at least one ledger per bucket
+pub const MAX_PERIOD_LEDGERS: u32 = 535_680; // 31 days
+pub const DAY_IN_LEDGERS: u32 = 17_280;
+pub const TTL_EXTEND_TO: u32 = 30 * DAY_IN_LEDGERS;
+pub const TTL_THRESHOLD: u32 = TTL_EXTEND_TO - DAY_IN_LEDGERS;
+```
 
 ### Storage
 
 ```rust
 #[contracttype]
 pub struct MandateParams {
-    pub max_per_tx: i128,          // > 0, token base units (USDC: 7 decimals)
-    pub recipients: Vec<Address>,  // empty = any recipient; max 20 entries
+    pub budget: i128,              // max total spend in any rolling window of period_ledgers
+    pub period_ledgers: u32,       // MIN_PERIOD_LEDGERS..=MAX_PERIOD_LEDGERS
+    pub max_per_tx: i128,          // 0 < max_per_tx <= budget
+    pub recipients: Vec<Address>,  // empty = any recipient; at most MAX_RECIPIENTS
     pub mandate_hash: BytesN<32>,  // sha256 of the canonical mandate JSON the owner approved
 }
 
 #[contracttype]
+pub struct Bucket { pub index: u32, pub amount: i128 }
+
+#[contracttype]
 pub struct MandateData {
-    pub token: Address,            // copied from the rule's CallContract address at install
+    pub token: Address,            // the rule's CallContract address, fixed at install
+    pub budget: i128,
+    pub period_ledgers: u32,       // fixed at install (changing it needs a new rule)
     pub max_per_tx: i128,
     pub recipients: Vec<Address>,
     pub mandate_hash: BytesN<32>,
     pub paused: bool,
-    pub tx_count: u32,
+    pub buckets: Vec<Bucket>,      // at most BUCKETS + 1 entries; constant size
 }
 
 #[contracttype]
@@ -105,48 +148,62 @@ pub enum DataKey {
 }
 ```
 
-TTL: extend on every read/write (threshold 29 days, extend to 30 days of ledgers, `DAY_IN_LEDGERS = 17280`, same as OZ).
+### Rolling budget (constant size, never over budget)
+
+- `bucket_len = ceil(period_ledgers / BUCKETS)`; `idx = ledger.sequence() / bucket_len`.
+- The live window is buckets with `index >= idx.saturating_sub(BUCKETS)`, i.e. the
+  current bucket plus the previous `BUCKETS`. Older buckets are dropped on write.
+- Any `period_ledgers`-long interval ending now falls inside those `BUCKETS + 1`
+  buckets, so **total spend in any rolling window of `period_ledgers` never exceeds
+  `budget`**. The trade-off: the window can be up to one `bucket_len` stricter than
+  the nominal period, never looser.
+- All sums use `checked_add`; overflow → `MathOverflow`.
 
 ### Functions
 
 | Function | Auth | Behavior |
 |---|---|---|
-| `install(e, params: MandateParams, context_rule: ContextRule, smart_account: Address)` | `smart_account.require_auth()` | Reject unless `context_rule.context_type == CallContract(token)` (`OnlyCallContractAllowed`). Reject if already installed, `max_per_tx <= 0`, or `recipients.len() > 20`. Store `MandateData { token, …, paused: false, tx_count: 0 }`. Emit `MandateInstalled`. |
-| `enforce(e, context: Context, authenticated_signers: Vec<Signer>, context_rule: ContextRule, smart_account: Address)` | `smart_account.require_auth()` | Load data (`NotInstalled`). If `paused` → `Paused`. **I3:** every `s` in `context_rule.signers` must be in `authenticated_signers` → else `SignerMissing`. `context` must be `Context::Contract` with `contract == token` and `fn_name == "transfer"` and 3 args → else `NotAllowed`. Decode `to = MuxedAddress::try_from_val(args[1]).address()`, `amount = i128::try_from_val(args[2])`. `amount <= 0` → `NotAllowed`. `amount > max_per_tx` → `PerTxLimitExceeded`. If `recipients` non-empty and `to ∉ recipients` → `RecipientNotAllowed`. `tx_count += 1`. Emit `MandateEnforced`. |
-| `uninstall(e, context_rule: ContextRule, smart_account: Address)` | `smart_account.require_auth()` | Remove entry. Emit `MandateUninstalled`. Called by OZ `remove_context_rule` / `remove_policy` (= **revoke agent**). |
-| `set_paused(e, smart_account: Address, context_rule_id: u32, paused: bool)` | `smart_account.require_auth()` | Toggle. Emit `MandatePaused`. Agent can't call this (I1), so only the owner passkey can. (= **freeze / unfreeze agent**) |
-| `update_mandate(e, smart_account: Address, context_rule_id: u32, params: MandateParams)` | `smart_account.require_auth()` | Same validation as install; keeps `token`, `paused`, `tx_count`. Emit `MandateUpdated`. (= **edit mandate**) |
+| `install(e, params: MandateParams, context_rule: ContextRule, smart_account: Address)` | `smart_account.require_auth()` | Reject unless `context_rule.context_type` is `CallContract(token)` (`OnlyCallContractAllowed`). Reject if already installed (`AlreadyInstalled`). Validate params (`InvalidParams`): `budget > 0`, `0 < max_per_tx <= budget`, period in range, `recipients.len() <= MAX_RECIPIENTS`. Store `MandateData { token, …, paused: false, buckets: [] }`, extend TTL. Emit `MandateInstalled`. |
+| `enforce(e, context: Context, authenticated_signers: Vec<Signer>, context_rule: ContextRule, smart_account: Address)` | `smart_account.require_auth()` | Load (`NotInstalled`). `paused` → `Paused`. **I3:** every signer in `context_rule.signers` must be in `authenticated_signers`, else `SignerMissing`. `context` must be `Context::Contract` with `contract == token`, `fn_name == "transfer"`, 3 args, else `NotAllowed`. `to = MuxedAddress::try_from_val(args[1])?.address()`, `amount = i128::try_from_val(args[2])?` (decode failure → `NotAllowed`). `amount <= 0` → `NotAllowed`. `amount > max_per_tx` → `PerTxLimitExceeded`. Recipients non-empty and `to ∉ recipients` → `RecipientNotAllowed`. Prune buckets, `spent + amount > budget` → `BudgetExceeded`. Add `amount` to the current bucket and write. **No event (I7). No TTL extension**, which keeps x402 payments cheap; the keeper extends TTL. |
+| `uninstall(e, context_rule: ContextRule, smart_account: Address)` | `smart_account.require_auth()` | Remove the entry; no error if missing. Emit `MandateUninstalled`. Called by OZ `remove_context_rule` / `remove_policy` (= **revoke agent**). |
+| `set_paused(e, smart_account: Address, context_rule_id: u32, paused: bool)` | `smart_account.require_auth()` | Set flag, extend TTL. Emit `MandatePaused`. Only the owner can call this (I1). (= **freeze / unfreeze**) |
+| `update_mandate(e, smart_account: Address, context_rule_id: u32, budget: i128, max_per_tx: i128, recipients: Vec<Address>, mandate_hash: BytesN<32>)` | `smart_account.require_auth()` | Same validation as install. Keeps `token`, `period_ledgers`, `paused`, `buckets` (spend so far still counts). Extend TTL. Emit `MandateUpdated`. (= **edit mandate**) |
+| `extend_ttl(e, smart_account: Address, context_rule_id: u32)` | none | Extend the entry's TTL (`TTL_THRESHOLD`, `TTL_EXTEND_TO`). `NotInstalled` if missing. Called by the keeper. |
 | `get_mandate(e, smart_account: Address, context_rule_id: u32) -> MandateData` | none | View. |
+| `remaining_budget(e, smart_account: Address, context_rule_id: u32) -> i128` | none | `budget - spent_in_window` (0 if paused). The agent calls this to decide between paying and proposing. |
 
-### Events (`#[contractevent]`)
+### Events (`#[contractevent]`; never emitted from `enforce`)
 
 | Event | Topics | Data |
 |---|---|---|
-| `MandateInstalled` | `smart_account`, `context_rule_id` | `token, max_per_tx, recipients, mandate_hash` |
-| `MandateEnforced` | `smart_account`, `context_rule_id` | `to: Address, amount: i128, mandate_hash, tx_count` |
-| `MandateUpdated` | `smart_account`, `context_rule_id` | `max_per_tx, recipients, mandate_hash` |
-| `MandatePaused` | `smart_account`, `context_rule_id` | `paused: bool` |
+| `MandateInstalled` | `smart_account`, `context_rule_id` | `token, budget, period_ledgers, max_per_tx, recipients, mandate_hash` |
+| `MandateUpdated` | `smart_account`, `context_rule_id` | `budget, max_per_tx, recipients, mandate_hash` |
+| `MandatePaused` | `smart_account`, `context_rule_id` | `paused` |
 | `MandateUninstalled` | `smart_account`, `context_rule_id` | — |
 
-`MandateEnforced` + OZ `SpendingLimitEnforced` are the agent-payment receipt: every
-autonomous payment is linked to the `mandate_hash` the owner approved.
-
-### Errors (`#[contracterror]`, range 4100–4199)
+### Errors (`#[contracterror]`, 4100–4199)
 
 `NotInstalled = 4100, AlreadyInstalled = 4101, OnlyCallContractAllowed = 4102,
 InvalidParams = 4103, Paused = 4104, SignerMissing = 4105, NotAllowed = 4106,
-PerTxLimitExceeded = 4107, RecipientNotAllowed = 4108`
+PerTxLimitExceeded = 4107, RecipientNotAllowed = 4108, BudgetExceeded = 4109,
+MathOverflow = 4110`
 
-Note: when `__check_auth` fails, callers only see `Error(Auth, InvalidAction)` —
-policy error codes surface in simulation diagnostics, not to the end caller. The
-SDK must read simulation diagnostics to tell the agent *why* (e.g. "over limit →
-open an approval request").
+When a policy panics inside `__check_auth`, the caller only sees
+`Error(Auth, InvalidAction)`. The specific code shows up in simulation diagnostics,
+so the SDK must read diagnostics to tell the agent *why* (e.g. `BudgetExceeded` →
+open an approval request).
+
+### Acceptance criteria (measured in Phase 8 on testnet)
+
+- Steady-state x402 payment under `:pay` has a min resource fee **< 50,000 stroops**
+  (the facilitator's default ceiling).
+- The official x402 facilitator verifies and settles it (no extra events).
 
 ---
 
 ## 5. Contract: `fosay-approvals`
 
-A queue of over-limit payment requests. Holds no funds, has no admin.
+A queue of payment requests over the agent's limits. Holds no funds, has no admin.
 
 ### Storage
 
@@ -157,12 +214,12 @@ pub enum IntentStatus { Pending, Executed, Cancelled, Expired }
 #[contracttype]
 pub struct Intent {
     pub id: u64,
-    pub account: Address,          // the FOSAY smart account paying
+    pub account: Address,          // the FOSAY smart account that pays
     pub token: Address,
     pub to: Address,
     pub amount: i128,
-    pub mandate_hash: BytesN<32>,  // which mandate/task this belongs to (may be zero bytes)
-    pub memo: String,              // agent's human-readable reason, max 140 bytes
+    pub mandate_hash: BytesN<32>,  // task/mandate this belongs to (may be all zeroes)
+    pub memo: String,              // agent's reason, at most 140 bytes
     pub created_ledger: u32,
     pub expires_ledger: u32,
     pub status: IntentStatus,
@@ -174,7 +231,7 @@ pub struct Config { pub max_pending_per_account: u32, pub max_ttl_ledgers: u32 }
 #[contracttype]
 pub enum DataKey {
     Config,                        // instance
-    NextId,                        // instance, u64
+    NextId,                        // instance, u64, starts at 1
     Intent(u64),                   // persistent
     PendingCount(Address),         // persistent, u32
 }
@@ -184,16 +241,16 @@ pub enum DataKey {
 
 | Function | Auth | Behavior |
 |---|---|---|
-| `__constructor(e, max_pending_per_account: u32, max_ttl_ledgers: u32)` | deploy-time | Store `Config`. Suggested: 20 pending, 120 960 ledgers (~7 days). Immutable afterwards. |
-| `propose(e, account: Address, token: Address, to: Address, amount: i128, mandate_hash: BytesN<32>, memo: String, ttl_ledgers: u32) -> u64` | `account.require_auth()` — satisfied by the agent's `:ask` rule or the owner rule | `amount > 0`, `0 < ttl_ledgers <= max_ttl_ledgers`, `memo.len() <= 140`, `PendingCount(account) < max_pending` → else errors. Store `Intent{status: Pending}`, increment `PendingCount`, `NextId`. Emit `IntentProposed`. Return id. (= **agent asks for a yes**) |
-| `execute(e, id: u64)` | none at this level (anyone may submit, e.g. a relayer); funds move only if `account` authorizes `token.transfer(account, to, amount)` — in practice the owner passkey under the `owner` rule | Status must be `Pending` (`NotPending`); `ledger <= expires_ledger` (`Expired`). Set `Executed`, decrement `PendingCount`, then `token::TokenClient::new(&token).transfer(&account, &to, &amount)`. Emit `IntentExecuted`. Atomic: if transfer auth fails, nothing changes. (= **human says yes**) |
-| `cancel(e, id: u64)` | `intent.account.require_auth()` | `Pending` → `Cancelled`, decrement count. Emit `IntentCancelled`. Owner uses it to **say no**; agent may use it to withdraw its own request. |
-| `expire(e, id: u64)` | none | If `Pending` and `ledger > expires_ledger` → `Expired`, decrement count. Emit `IntentExpired`. Frees pending slots; callable by the indexer/cron. |
+| `__constructor(e, max_pending_per_account: u32, max_ttl_ledgers: u32)` | deploy | Store `Config` (suggested 20 and 120,960 ≈ 7 days). Both must be > 0. Immutable. |
+| `propose(e, account: Address, token: Address, to: Address, amount: i128, mandate_hash: BytesN<32>, memo: String, ttl_ledgers: u32) -> u64` | `account.require_auth()` (agent `:ask` rule or owner) | `amount > 0` (`InvalidAmount`), `0 < ttl_ledgers <= max_ttl_ledgers` (`InvalidTtl`), `memo.len() <= 140` (`MemoTooLong`), `PendingCount(account) < max_pending` (`TooManyPending`). Store `Intent { status: Pending }`, increment `PendingCount` and `NextId`, extend TTLs. Emit `IntentProposed`. Return id. (= **agent asks for a yes**) |
+| `execute(e, id: u64)` | `intent.account.require_auth()` **first** (I6), then the nested `transfer` needs the account's auth too | Load (`NotFound`); `Pending` (`NotPending`); `ledger <= expires_ledger` (`Expired`). `account.require_auth()`. Set `Executed`, decrement `PendingCount`, then `token::TokenClient::new(&e, &token).transfer(&account, &to, &amount)`. Emit `IntentExecuted`. Atomic. The owner signs one auth entry (root `execute(id)`, sub-invocation `transfer`) with `context_rule_ids = [owner, owner]`. The agent can only execute requests whose transfer also passes its `:pay` rule. (= **human says yes**) |
+| `cancel(e, id: u64)` | `intent.account.require_auth()` | `Pending` → `Cancelled`, decrement count. Emit `IntentCancelled`. Owner = **say no**; agent = withdraw. |
+| `expire(e, id: u64)` | none | `Pending` and `ledger > expires_ledger` → `Expired`, decrement count; otherwise `NotYetExpired` / `NotPending`. Emit `IntentExpired`. Frees slots; called by the keeper. |
 | `get_intent(e, id: u64) -> Intent` | none | View. |
 | `pending_count(e, account: Address) -> u32` | none | View. |
 
-Lists ("show my pending requests") come from the indexer reading events, not from
-on-chain iteration.
+TTL: `Intent(id)` and `PendingCount` extended on every write (`TTL_THRESHOLD`/`TTL_EXTEND_TO`
+as above). Instance storage extended on every call. Lists come from the indexer.
 
 ### Events
 
@@ -204,61 +261,65 @@ on-chain iteration.
 | `IntentCancelled` | `account`, `id` | — |
 | `IntentExpired` | `account`, `id` | — |
 
-`IntentProposed` is what triggers the phone push notification.
+`IntentProposed` triggers the phone push notification. **Client rule:** the approval
+screen must show the amount and recipient decoded from the auth entry's
+`transfer` sub-invocation that the passkey will sign, not just indexer data.
 
-### Errors (range 4200–4299)
+### Errors (4200–4299)
 
 `NotFound = 4200, NotPending = 4201, Expired = 4202, NotYetExpired = 4203,
-InvalidAmount = 4204, InvalidTtl = 4205, MemoTooLong = 4206, TooManyPending = 4207`
+InvalidAmount = 4204, InvalidTtl = 4205, MemoTooLong = 4206, TooManyPending = 4207,
+InvalidConfig = 4208`
 
 ---
 
 ## 6. Every function mapped to a product step
 
-| Product step (user flow) | On-chain calls |
+| Product step | On-chain calls |
 |---|---|
-| 1. Create wallet with passkey | smart-account-kit `createWallet` (canonical OZ account, `owner` rule) — no FOSAY contract |
-| 2. Connect an agent (agent generates its own ed25519 key, sends pubkey) | owner passkey signs: OZ `add_context_rule(CallContract(USDC), "agt1:pay", valid_until, [agent signer], {spending_limit: {limit, period}, mandate_policy: MandateParams})` → triggers `spending_limit.install` + `fosay-mandate-policy.install`; then `add_context_rule(CallContract(approvals), "agt1:ask", valid_until, [agent signer], {})` |
-| 3. Agent pays within limits (x402 / MPP charge / transfer) | USDC `transfer` → account `__check_auth` → `spending_limit.enforce` + `fosay-mandate-policy.enforce` |
-| 4. Agent hits a limit, asks for approval | `fosay-approvals.propose` (agent `:ask` rule) |
-| 5. Human approves on phone | `fosay-approvals.execute` with owner passkey authorizing the inner `transfer` |
-| 6. Human rejects | `fosay-approvals.cancel` (owner) |
-| 7. Freeze / unfreeze agent | `fosay-mandate-policy.set_paused` (owner) |
-| 8. Edit limits / allowlist | OZ spending_limit setter + `fosay-mandate-policy.update_mandate` (owner) |
-| 9. Revoke agent (one tap) | OZ `remove_context_rule` ×2 (owner) → `uninstall` on both policies |
-| 10. Mandate expires | OZ rule `valid_until` passes → agent rules rejected automatically |
-| 11. Activity feed / receipts | Indexer reads `MandateEnforced`, `SpendingLimitEnforced`, `Intent*` events |
+| 1. Create wallet with passkey | smart-account-kit `createWallet` (canonical OZ account; `owner` rule 0) |
+| 2. Connect an agent (agent generates its own Ed25519 key, sends only the public key) | Owner signature 1: OZ `add_context_rule(CallContract(USDC), "agt1:pay", valid_until, [agent], {mandate_policy: MandateParams})` → `fosay-mandate-policy.install`. Owner signature 2: `add_context_rule(CallContract(approvals), "agt1:ask", valid_until, [agent], {})` |
+| 3. Agent checks headroom | `fosay-mandate-policy.remaining_budget` |
+| 4. Agent pays within its mandate (x402 / MPP charge / transfer) | USDC `transfer` → account `__check_auth` → `fosay-mandate-policy.enforce` |
+| 5. Agent hits a limit and asks | `fosay-approvals.propose` (agent `:ask` rule) |
+| 6. Human approves on phone | `fosay-approvals.execute(id)`, owner passkey, rule ids `[0, 0]` |
+| 7. Human rejects | `fosay-approvals.cancel` (owner) |
+| 8. Freeze / unfreeze agent | `fosay-mandate-policy.set_paused` (owner) |
+| 9. Edit budget / caps / allowlist | `fosay-mandate-policy.update_mandate` (owner) |
+| 10. Revoke agent (one action per rule) | OZ `remove_context_rule` for `:pay` and `:ask` → `uninstall` |
+| 11. Mandate expires | Rule `valid_until` passes → agent rules rejected |
+| 12. Keep payments cheap | Keeper: `fosay-mandate-policy.extend_ttl`, `fosay-approvals.expire`, plus `ExtendFootprintTTL` on the account's own entries |
+| 13. Activity feed / receipts | Indexer: SAC `transfer` events where `from` = wallet, attributed to an agent through the tx envelope's `AuthPayload.context_rule_ids`; `Mandate*` and `Intent*` events |
 
 No function exists that isn't on this list.
 
 ---
 
-## 7. Phase-5 gate: spikes to run before writing contract code
+## 7. Validation status
 
-These are the unverified assumptions. Each is a short testnet script. If one fails,
-the design changes before code is written.
-
-| # | Assumption | Evidence so far | How to test |
-|---|---|---|---|
-| S1 | The x402 facilitator accepts a smart account (C-address) as payer | `@x402/stellar@2.30.0` facilitator: no C-address rejection; "signed" = signature not `scvVoid`; rejects auth sub-invocations (none here with External signers). **But** the stock client (`ExactStellarScheme` + `createEd25519Signer`) signs as a classic G-account and cannot produce an OZ `AuthPayload`. | Build the payment tx manually: USDC `transfer(C-account, payTo, amount)`, sign with agent ed25519 via the OZ digest (`auth_digest`), submit to the testnet facilitator's `/verify` and `/settle`. If it passes, FOSAY ships its own x402 client signer in `fosay-app`. |
-| S2 | `fosay-approvals.execute` works when the owner authorizes only the inner `token.transfer` (non-root auth entry) | Standard Soroban behavior, but not yet exercised with an OZ account + WebAuthn | Testnet: propose → execute with passkey-signed auth entry rooted at `USDC.transfer`. |
-| S3 | Two `add_context_rule` calls can be done with one passkey prompt | Unknown for the canonical account build | Check whether the canonical account exposes a batch/execute entry point; otherwise accept two prompts in v1. |
-| S4 | Facilitator fee ceiling covers smart-account `__check_auth` (verifier + 2 policies) | Facilitator uses `maxTransactionFeeStroops` as a ceiling | Measure resource fee of an S1 payment. |
+| Assumption | Status |
+|---|---|
+| We can sign for OZ v0.8.0 smart accounts (AuthPayload, preimage-v1) | ✅ on testnet |
+| x402 facilitator accepts a smart-account payer | ✅ when no policy emits events (S1) |
+| Approval bound to `execute(id)` works with an OZ account | ✅ (S2b, fee 12,284) |
+| Smart-account payment cost in steady state | ✅ about the same as a G-account (11,332 vs 10,887) |
+| `fosay-mandate-policy` steady-state cost < 50,000 stroops | ⏳ Phase 8 measurement (acceptance criterion) |
+| Hosted Built-on-Stellar facilitator + real testnet USDC | ⏳ Phase 8 (host not yet allowed in the environment) |
+| Owner signing with WebAuthn passkeys end to end | ⏳ `fosay-app` (verifier contract already canonical) |
+| Upstream x402 issue (validate only asset events) | Deferred by decision, 2026-11-09 |
 
 ---
 
 ## 8. Verified facts (2026-11-09)
 
-- `stellar-accounts` latest = **0.8.0**, depends on `soroban-sdk ^28.0.0`. `soroban-sdk` latest stable = 29.0.1 (not compatible with stellar-accounts 0.8.0).
-- OZ limits: 15 signers/rule, 5 policies/rule, rule name ≤ 20 bytes, unlimited rules. Caller supplies one rule id per auth context in `AuthPayload::context_rule_ids`.
-- OZ `spending_limit` (v0.8.0): only intercepts `transfer`, amount = `args[2]`; requires `CallContract` rule; rolling window in ledgers; `MAX_HISTORY_ENTRIES = 815`; error `SpendingLimitExceeded = 3221`.
-- SAC `transfer` signature in soroban-sdk 28: `transfer(from: Address, to: MuxedAddress, amount: i128)`; `MuxedAddress::address()` exists.
-- smart-account-kit **0.10.0** (2026-10-27): not independently audited (its own README). New wallets should use account WASM `c514d35ea67eaea9bfc1fb3327854c0c06111bc1ddebd4fe217c504c1004b9e1`.
-- Testnet: WebAuthn verifier `CC7EKIHQP3TN4CARQDND6CEOY2UXLWWC2X5GHTD5NLAT7BG5GPZIOM3F`, Ed25519 verifier `CAAVTMCBXEIBPR64EAASKFXERVPYFZA2JYP5A3BG6PESWEFUJX5IHKN4`, spending-limit v0.8.0 `CC3CEYQAP6NPNFIYSWL5MVZRCPJZGWX4XO7WDEJOUVGO2FZX5OONYPA5`.
-- Mainnet: WebAuthn verifier `CB7HENHJ7NF34I5FFXQK7D5I3WWQRGB5O5XO77D3NXMT7LM7LOKRQ5YR`, Ed25519 verifier `CBOOZV2BK5OETGL4Q4KGEBESPRLJFN7DOFWDT7OZGLD7EQEZUVOWUEMC`, spending-limit v0.8.0 `CDB2CVES2QMAL73US4EEAM43B4V3MBEP4K6I2UM7XZ25O4GGQE5CY3UG`.
-- `@x402/stellar` latest = **2.30.0** (2026-11-04); facilitators always sponsor fees; default payment expiry ~12 ledgers.
+- `stellar-accounts` 0.8.0 → `soroban-sdk ^28.0.0`; `soroban-sdk` latest stable 29.0.1; Stellar CLI latest 30.0.1. Testnet runs protocol 30.
+- OZ limits: 15 signers/rule, 5 policies/rule, rule name ≤ 20 bytes. One rule id per auth context.
+- The canonical account exposes `execute(target, target_fn, target_args)`, `upgrade(new_wasm_hash, operator)`, `batch_add_signer`; no multi-rule batch.
+- SAC `transfer(from: Address, to: MuxedAddress, amount: i128)` in soroban-sdk 28; `MuxedAddress::address()` exists.
+- x402 facilitator (`@x402/stellar` 2.30.0): default fee ceiling 50,000 stroops; rejects any contract event other than the asset `transfer`; rejects auth sub-invocations; payment auth expiry ≤ ~12 ledgers (+2).
+- Testnet: WebAuthn verifier `CC7EKIHQP3TN4CARQDND6CEOY2UXLWWC2X5GHTD5NLAT7BG5GPZIOM3F`, Ed25519 verifier `CAAVTMCBXEIBPR64EAASKFXERVPYFZA2JYP5A3BG6PESWEFUJX5IHKN4`.
+- Mainnet: WebAuthn verifier `CB7HENHJ7NF34I5FFXQK7D5I3WWQRGB5O5XO77D3NXMT7LM7LOKRQ5YR`, Ed25519 verifier `CBOOZV2BK5OETGL4Q4KGEBESPRLJFN7DOFWDT7OZGLD7EQEZUVOWUEMC`.
+- Test fixtures in `tests/fixtures/` were fetched from testnet; their SHA-256 values match the smart-account-kit deployment manifest: account `c514d35e…`, Ed25519 verifier `60e8798d…`, WebAuthn verifier `e63a030d…`.
+- smart-account-kit 0.10.0 and its bindings have not had an independent audit (their own READMEs).
 
-Sources: crates.io (`stellar-accounts` 0.8.0 source, `soroban-sdk` 28.0.0 source),
-npm (`@x402/stellar` 2.30.0, `smart-account-kit` 0.10.0),
-`github.com/stellar/smart-account-kit/docs/deployments-*.md`.
-Re-verify contract IDs before mainnet.
+Re-verify all contract IDs before mainnet.

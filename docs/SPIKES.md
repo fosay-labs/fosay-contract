@@ -84,7 +84,7 @@ its own limit, so harmless). Only the owner can push an over-limit intent throug
 - OZ spending-limit writes a growing `spending_history` vector on every payment,
   which puts it above the default ceiling.
 
-## Design consequences (to fold into SPEC.md v0.2)
+## Design consequences (folded into SPEC.md v0.2)
 
 1. **Replace OZ `spending_limit` on the agent `:pay` rule with one lean FOSAY policy**
    (mandate + rolling budget combined) that:
