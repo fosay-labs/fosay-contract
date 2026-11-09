@@ -1,9 +1,12 @@
 name: Release
 
-# Pushing a tag v* publishes a GitHub Release with the notes in
-# .github/release-notes/<tag>.md (falls back to generated notes).
+# Adding .github/release-notes/<tag>.md to main publishes that release: the tag is created
+# on the pushed commit and the file becomes the release notes. Tags containing "-" (such as
+# v0.1.0-testnet) are marked as pre-releases. Pushing a v* tag by hand also works.
 on:
   push:
+    branches: [main]
+    paths: ['.github/release-notes/**']
     tags: ['v*']
 
 permissions:
@@ -15,15 +18,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Create release
+      - name: Create missing releases
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
         run: |
-          notes=".github/release-notes/${TAG}.md"
-          pre=""; case "$TAG" in *-*) pre="--prerelease";; esac
-          if [ -f "$notes" ]; then
-            gh release create "$TAG" --title "$TAG" --notes-file "$notes" $pre --verify-tag
-          else
-            gh release create "$TAG" --title "$TAG" --generate-notes $pre --verify-tag
+          if [ "${GITHUB_REF_TYPE}" = tag ]; then tags="${GITHUB_REF_NAME}"; else
+            tags=$(ls .github/release-notes/*.md 2>/dev/null | xargs -n1 basename | sed 's/\.md$//')
           fi
+          for tag in $tags; do
+            if gh release view "$tag" >/dev/null 2>&1; then echo "exists: $tag"; continue; fi
+            notes=".github/release-notes/${tag}.md"
+            args=(--title "$tag" --target "$GITHUB_SHA")
+            if [ -f "$notes" ]; then args+=(--notes-file "$notes"); else args+=(--generate-notes); fi
+            case "$tag" in *-*) args+=(--prerelease);; esac
+            gh release create "$tag" "${args[@]}"
+            echo "released: $tag"
+          done
