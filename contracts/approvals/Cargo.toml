@@ -1,0 +1,21 @@
+[package]
+name = "fosay-approvals"
+description = "FOSAY approvals queue: an AI agent proposes over-limit payments; the wallet owner approves them with a passkey."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+version.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+doctest = false
+
+[dependencies]
+soroban-sdk = { workspace = true }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }
+stellar-accounts = { workspace = true }
+ed25519-dalek = { workspace = true }
+fosay-mandate-policy = { path = "../mandate-policy" }
