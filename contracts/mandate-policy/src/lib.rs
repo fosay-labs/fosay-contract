@@ -11,6 +11,9 @@ pub mod events;
 pub mod storage;
 pub mod types;
 
+#[cfg(test)]
+mod test;
+
 pub use crate::contract::*;
 pub use crate::errors::*;
 pub use crate::types::*;
