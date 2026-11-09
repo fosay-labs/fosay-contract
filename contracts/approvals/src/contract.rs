@@ -153,6 +153,16 @@ impl Approvals {
         Self::close(e, &mut intent, IntentStatus::Expired);
         events::emit_expired(e, &intent);
     }
+
+    /// Returns an intent (SPEC §5 `get_intent`). Errors: `NotFound`.
+    pub fn get_intent(e: &Env, id: u64) -> Intent {
+        storage::load_intent(e, id)
+    }
+
+    /// Number of pending intents for `account` (SPEC §5 `pending_count`).
+    pub fn pending_count(e: &Env, account: Address) -> u32 {
+        storage::pending_count(e, &account)
+    }
 }
 
 impl Approvals {
