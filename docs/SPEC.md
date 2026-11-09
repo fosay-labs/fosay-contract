@@ -6,7 +6,7 @@
 > the limit you set *is* the yes, given in advance. Anything bigger waits for you
 > to approve it on your phone with your passkey. One tap revokes the agent.
 
-**Status:** design validated on testnet (see [`SPIKES.md`](./SPIKES.md)); not yet implemented.
+**Status:** design validated on testnet (see [`SPIKES.md`](./SPIKES.md)); implemented in `contracts/` with 46 tests; not yet deployed.
 
 **Changes from v0.1** (all driven by the testnet spikes):
 1. The agent's `:pay` rule uses **one** FOSAY policy that also enforces the rolling
@@ -59,8 +59,10 @@ In every authorization the client supplies one rule id per auth context
   `transfer(account, …)` that the account authorizes for that exact call.
 - **I3.** A rule with policies defers signer checks to the policies (OZ: "with policies,
   full signer validation is deferred to `enforce()`"). `fosay-mandate-policy::enforce`
-  **must** assert that every signer of the rule is in `authenticated_signers`. It is
-  the only policy on `:pay`, so nothing else checks this.
+  **must** assert that the rule has at least one signer and that every signer of the
+  rule is in `authenticated_signers`. It is the only policy on `:pay`, so nothing else
+  checks this. The non-empty check means a misconfigured rule with no signers can never
+  spend.
 - **I4.** No admin, no upgrade, no owner-settable config in FOSAY contracts. New
   versions are new deployments.
 - **I5.** The agent's secret key never reaches FOSAY's app or servers. Only its public
@@ -164,7 +166,7 @@ pub enum DataKey {
 | Function | Auth | Behavior |
 |---|---|---|
 | `install(e, params: MandateParams, context_rule: ContextRule, smart_account: Address)` | `smart_account.require_auth()` | Reject unless `context_rule.context_type` is `CallContract(token)` (`OnlyCallContractAllowed`). Reject if already installed (`AlreadyInstalled`). Validate params (`InvalidParams`): `budget > 0`, `0 < max_per_tx <= budget`, period in range, `recipients.len() <= MAX_RECIPIENTS`. Store `MandateData { token, …, paused: false, buckets: [] }`, extend TTL. Emit `MandateInstalled`. |
-| `enforce(e, context: Context, authenticated_signers: Vec<Signer>, context_rule: ContextRule, smart_account: Address)` | `smart_account.require_auth()` | Load (`NotInstalled`). `paused` → `Paused`. **I3:** every signer in `context_rule.signers` must be in `authenticated_signers`, else `SignerMissing`. `context` must be `Context::Contract` with `contract == token`, `fn_name == "transfer"`, 3 args, else `NotAllowed`. `to = MuxedAddress::try_from_val(args[1])?.address()`, `amount = i128::try_from_val(args[2])?` (decode failure → `NotAllowed`). `amount <= 0` → `NotAllowed`. `amount > max_per_tx` → `PerTxLimitExceeded`. Recipients non-empty and `to ∉ recipients` → `RecipientNotAllowed`. Prune buckets, `spent + amount > budget` → `BudgetExceeded`. Add `amount` to the current bucket and write. **No event (I7). No TTL extension**, which keeps x402 payments cheap; the keeper extends TTL. |
+| `enforce(e, context: Context, authenticated_signers: Vec<Signer>, context_rule: ContextRule, smart_account: Address)` | `smart_account.require_auth()` | Load (`NotInstalled`). `paused` → `Paused`. **I3:** `context_rule.signers` must be non-empty and every signer in it must be in `authenticated_signers`, else `SignerMissing`. `context` must be `Context::Contract` with `contract == token`, `fn_name == "transfer"`, 3 args, else `NotAllowed`. `to = MuxedAddress::try_from_val(args[1])?.address()`, `amount = i128::try_from_val(args[2])?` (decode failure → `NotAllowed`). `amount <= 0` → `NotAllowed`. `amount > max_per_tx` → `PerTxLimitExceeded`. Recipients non-empty and `to ∉ recipients` → `RecipientNotAllowed`. Prune buckets, `spent + amount > budget` → `BudgetExceeded`. Add `amount` to the current bucket and write. **No event (I7). No TTL extension**, which keeps x402 payments cheap; the keeper extends TTL. |
 | `uninstall(e, context_rule: ContextRule, smart_account: Address)` | `smart_account.require_auth()` | Remove the entry; no error if missing. Emit `MandateUninstalled`. Called by OZ `remove_context_rule` / `remove_policy` (= **revoke agent**). |
 | `set_paused(e, smart_account: Address, context_rule_id: u32, paused: bool)` | `smart_account.require_auth()` | Set flag, extend TTL. Emit `MandatePaused`. Only the owner can call this (I1). (= **freeze / unfreeze**) |
 | `update_mandate(e, smart_account: Address, context_rule_id: u32, budget: i128, max_per_tx: i128, recipients: Vec<Address>, mandate_hash: BytesN<32>)` | `smart_account.require_auth()` | Same validation as install. Keeps `token`, `period_ledgers`, `paused`, `buckets` (spend so far still counts). Extend TTL. Emit `MandateUpdated`. (= **edit mandate**) |
