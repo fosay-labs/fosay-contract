@@ -5,5 +5,7 @@
 //! rule. See `docs/SPEC.md` §4.
 
 pub mod contract;
+pub mod types;
 
 pub use crate::contract::*;
+pub use crate::types::*;
