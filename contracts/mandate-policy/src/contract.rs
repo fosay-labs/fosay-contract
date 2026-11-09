@@ -157,4 +157,33 @@ impl MandatePolicy {
         storage::save_and_extend(e, &smart_account, context_rule_id, &data);
         events::emit_updated(e, &smart_account, context_rule_id, &data);
     }
+
+    /// Extends the TTL of a mandate entry (SPEC §4 `extend_ttl`). No auth: anyone (the
+    /// FOSAY keeper) may pay to keep a wallet's payments in the cheap steady state.
+    /// Errors: `NotInstalled`.
+    pub fn extend_ttl(e: &Env, smart_account: Address, context_rule_id: u32) {
+        if !storage::has(e, &smart_account, context_rule_id) {
+            panic_with_error!(e, MandateError::NotInstalled)
+        }
+        storage::extend(e, &smart_account, context_rule_id);
+    }
+
+    /// Returns the stored mandate (SPEC §4 `get_mandate`). Errors: `NotInstalled`.
+    pub fn get_mandate(e: &Env, smart_account: Address, context_rule_id: u32) -> MandateData {
+        storage::load_or_panic(e, &smart_account, context_rule_id)
+    }
+
+    /// Budget left in the current rolling window, or 0 while paused
+    /// (SPEC §4 `remaining_budget`). The agent calls this to choose between paying and
+    /// proposing an approval request. Errors: `NotInstalled`, `MathOverflow`.
+    pub fn remaining_budget(e: &Env, smart_account: Address, context_rule_id: u32) -> i128 {
+        let data = storage::load_or_panic(e, &smart_account, context_rule_id);
+        if data.paused {
+            return 0;
+        }
+        let idx = budget::current_index(e.ledger().sequence(), data.period_ledgers);
+        let spent = budget::spent(&budget::prune(e, &data.buckets, idx))
+            .unwrap_or_else(|| panic_with_error!(e, MandateError::MathOverflow));
+        data.budget.saturating_sub(spent).max(0)
+    }
 }
