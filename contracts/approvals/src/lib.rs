@@ -8,6 +8,7 @@
 pub mod contract;
 pub mod errors;
 pub mod events;
+pub mod storage;
 pub mod types;
 
 pub use crate::contract::*;
