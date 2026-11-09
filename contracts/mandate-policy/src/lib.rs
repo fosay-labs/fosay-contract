@@ -4,6 +4,7 @@
 //! An OpenZeppelin smart-account policy installed on an AI agent's `:pay` context
 //! rule. See `docs/SPEC.md` §4.
 
+pub mod budget;
 pub mod contract;
 pub mod errors;
 pub mod events;
