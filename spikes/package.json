@@ -1,0 +1,12 @@
+{
+  "name": "fosay-spikes",
+  "private": true,
+  "type": "module",
+  "description": "Throwaway testnet spikes that validated the FOSAY contract design. See ../docs/SPIKES.md.",
+  "dependencies": {
+    "@stellar/stellar-sdk": "16.4.1",
+    "@x402/core": "2.30.0",
+    "@x402/stellar": "2.30.0",
+    "smart-account-kit-bindings": "0.5.0"
+  }
+}
