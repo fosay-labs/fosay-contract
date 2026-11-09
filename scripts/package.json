@@ -1,0 +1,16 @@
+{
+  "name": "fosay-contract-scripts",
+  "private": true,
+  "type": "module",
+  "description": "Deploy and smoke-test FOSAY contracts. See ../docs/DEPLOYMENT.md.",
+  "scripts": {
+    "deploy": "node deploy.mjs",
+    "smoke": "node smoke-testnet.mjs"
+  },
+  "dependencies": {
+    "@stellar/stellar-sdk": "16.4.1",
+    "@x402/core": "2.30.0",
+    "@x402/stellar": "2.30.0",
+    "smart-account-kit": "0.10.0"
+  }
+}
