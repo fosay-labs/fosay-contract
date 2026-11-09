@@ -17,6 +17,7 @@ budget you set**. Anything bigger waits for you to approve it with your passkey.
 
 **Try it (testnet):** [fosay-labs.github.io/fosay-app](https://fosay-labs.github.io/fosay-app/) ·
 **App, SDK and MCP server:** [`fosay-labs/fosay-app`](https://github.com/fosay-labs/fosay-app) ·
+**Docs:** [fosay-labs.github.io/fosay-app/docs](https://fosay-labs.github.io/fosay-app/docs/) ·
 **Spec:** [`docs/SPEC.md`](docs/SPEC.md) · **Deployment:** [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)
 
 ## How it works
