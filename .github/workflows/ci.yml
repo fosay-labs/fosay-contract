@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: fmt, clippy, test, wasm build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32v1-none
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install Stellar CLI
+        run: cargo install --locked stellar-cli@30.0.1
+
+      - name: Format
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace
+
+      - name: Build wasm
+        run: stellar contract build
+
+      - name: Verify fixture hashes
+        run: |
+          echo "c514d35ea67eaea9bfc1fb3327854c0c06111bc1ddebd4fe217c504c1004b9e1  tests/fixtures/oz_smart_account_v0_8_0.wasm" | sha256sum -c
+          echo "60e8798db610bdaf3370d39ebda56ee1dc2c15ce1c3a9e28b528bfa24a06b477  tests/fixtures/oz_ed25519_verifier.wasm" | sha256sum -c
+          echo "e63a030d0f1a1481e36059a4837c433083b33e704c1f9625b7314795b6d72b76  tests/fixtures/oz_webauthn_verifier.wasm" | sha256sum -c
