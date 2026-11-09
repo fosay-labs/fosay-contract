@@ -121,4 +121,46 @@ impl Approvals {
         );
         events::emit_executed(e, &intent);
     }
+
+    /// Rejects (owner) or withdraws (agent) a pending request (SPEC §5 `cancel`).
+    ///
+    /// Auth: `intent.account`. Errors: `NotFound`, `NotPending`.
+    /// Events: `IntentCancelled`.
+    pub fn cancel(e: &Env, id: u64) {
+        storage::extend_instance(e);
+        let mut intent = storage::load_intent(e, id);
+        intent.account.require_auth();
+        if intent.status != IntentStatus::Pending {
+            panic_with_error!(e, ApprovalsError::NotPending)
+        }
+        Self::close(e, &mut intent, IntentStatus::Cancelled);
+        events::emit_cancelled(e, &intent);
+    }
+
+    /// Marks an unanswered request as expired and frees its pending slot
+    /// (SPEC §5 `expire`). No auth: the FOSAY keeper calls it.
+    ///
+    /// Errors: `NotFound`, `NotPending`, `NotYetExpired`. Events: `IntentExpired`.
+    pub fn expire(e: &Env, id: u64) {
+        storage::extend_instance(e);
+        let mut intent = storage::load_intent(e, id);
+        if intent.status != IntentStatus::Pending {
+            panic_with_error!(e, ApprovalsError::NotPending)
+        }
+        if e.ledger().sequence() <= intent.expires_ledger {
+            panic_with_error!(e, ApprovalsError::NotYetExpired)
+        }
+        Self::close(e, &mut intent, IntentStatus::Expired);
+        events::emit_expired(e, &intent);
+    }
+}
+
+impl Approvals {
+    /// Sets a final status on a pending intent and releases its pending slot.
+    fn close(e: &Env, intent: &mut Intent, status: IntentStatus) {
+        intent.status = status;
+        storage::save_intent(e, intent);
+        let pending = storage::pending_count(e, &intent.account);
+        storage::set_pending_count(e, &intent.account, pending.saturating_sub(1));
+    }
 }
