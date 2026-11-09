@@ -10,6 +10,7 @@ pub mod errors;
 pub mod events;
 pub mod storage;
 pub mod types;
+pub mod validation;
 
 #[cfg(test)]
 mod test;
