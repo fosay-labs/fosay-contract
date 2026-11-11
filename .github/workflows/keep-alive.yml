@@ -1,0 +1,30 @@
+name: Keep testnet contracts alive
+
+# Soroban entries are archived when their TTL runs out. This extends the FOSAY contract
+# instances and code, the OZ verifiers and the canonical OZ account code to 31 days whenever
+# any has under 21 days left, so the testnet deployment keeps working even when no API keeper
+# runs. Uses a throwaway Friendbot-funded key: no secrets needed on testnet.
+
+on:
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  extend:
+    name: extend shared contract TTLs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install script dependencies
+        working-directory: scripts
+        run: npm ci
+      - name: Extend TTLs
+        working-directory: scripts
+        run: node keep-alive.mjs

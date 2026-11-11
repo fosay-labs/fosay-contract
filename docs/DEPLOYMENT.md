@@ -51,6 +51,18 @@ stellar contract deploy --wasm-hash <hash> --source deployer --network testnet -
   --max_pending_per_account 20 --max_ttl_ledgers 120960
 ```
 
+## Keeping the deployment alive
+
+Soroban archives entries whose TTL runs out. `scripts/keep-alive.mjs` extends the FOSAY
+contract instances and code, the OZ verifiers and the canonical OZ account code to 31 days
+when any has under 21 days left. `.github/workflows/keep-alive.yml` runs it every Monday with a
+throwaway Friendbot-funded key, so the testnet deployment survives without a running API.
+Per-wallet entries (rules, mandates, balances) are kept alive by the `fosay-app` API keeper.
+
+```bash
+cd scripts && node keep-alive.mjs
+```
+
 ## Smoke test
 
 ```bash
