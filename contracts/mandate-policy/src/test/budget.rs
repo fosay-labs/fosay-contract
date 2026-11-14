@@ -2,8 +2,9 @@
 
 extern crate std;
 
-use soroban_sdk::{Env, Vec};
+use soroban_sdk::{testutils::Address as _, Address, Env, Vec};
 
+use super::helpers::{contract_fn, to_scval, Wallet, UNIT};
 use crate::{
     budget::{bucket_len, current_index, empty_ring, record, spent, SLOTS},
     types::{Bucket, BUCKETS},
@@ -139,4 +140,45 @@ fn rolling_window_never_exceeds_budget() {
             }
         }
     }
+}
+
+#[test]
+fn mandate_entry_size_is_constant_across_pause_and_period_reset() {
+    use soroban_sdk::xdr::{Limits, WriteXdr};
+    let w = Wallet::new(10 * UNIT, 1_000, 3 * UNIT);
+    let to = Address::generate(&w.e);
+    let size = || {
+        to_scval(&w.e, w.policy_client().get_mandate(&w.account, &w.pay_rule))
+            .to_xdr(Limits::none())
+            .unwrap()
+            .len()
+    };
+    let set_paused_inv = |paused: bool| {
+        contract_fn(
+            &w.policy,
+            "set_paused",
+            std::vec![
+                to_scval(&w.e, w.account.clone()),
+                to_scval(&w.e, w.pay_rule),
+                to_scval(&w.e, paused),
+            ],
+        )
+    };
+    let before = size();
+    for _ in 0..3 {
+        assert!(w.agent_pay(&to, UNIT));
+        assert_eq!(size(), before);
+    }
+    w.as_owner(set_paused_inv(true), 1, || {
+        w.policy_client().set_paused(&w.account, &w.pay_rule, &true)
+    });
+    assert_eq!(size(), before);
+    w.as_owner(set_paused_inv(false), 1, || {
+        w.policy_client()
+            .set_paused(&w.account, &w.pay_rule, &false)
+    });
+    assert_eq!(size(), before);
+    w.advance(1_000);
+    assert!(w.agent_pay(&to, UNIT));
+    assert_eq!(size(), before);
 }

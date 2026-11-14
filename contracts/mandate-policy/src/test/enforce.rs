@@ -175,10 +175,37 @@ fn mandate_entry_size_is_constant_across_payments() {
         .unwrap();
         v.to_xdr(Limits::none()).unwrap().len()
     };
+    let set_paused_inv = |paused: bool| {
+        contract_fn(
+            &w.policy,
+            "set_paused",
+            std::vec![
+                to_scval(&w.e, w.account.clone()),
+                to_scval(&w.e, w.pay_rule),
+                to_scval(&w.e, paused),
+            ],
+        )
+    };
     let initial = size(&w);
     for i in 0..30u32 {
         assert!(w.agent_pay(&to, UNIT / 10));
         w.advance(3 + (i % 17)); // crosses many 10-ledger buckets, with gaps
         assert_eq!(size(&w), initial, "entry size changed after payment {i}");
     }
+    w.as_owner(set_paused_inv(true), 1, || {
+        w.policy_client().set_paused(&w.account, &w.pay_rule, &true)
+    });
+    assert_eq!(size(&w), initial, "entry size changed after pause");
+    w.as_owner(set_paused_inv(false), 1, || {
+        w.policy_client()
+            .set_paused(&w.account, &w.pay_rule, &false)
+    });
+    assert_eq!(size(&w), initial, "entry size changed after unpause");
+    w.advance(80);
+    assert!(w.agent_pay(&to, UNIT / 10));
+    assert_eq!(
+        size(&w),
+        initial,
+        "entry size changed after period reset payment"
+    );
 }
