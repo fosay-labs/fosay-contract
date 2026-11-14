@@ -5,19 +5,16 @@ on:
     branches: [main]
   pull_request:
 
-concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
-
 env:
   CARGO_TERM_COLOR: always
+  STELLAR_CLI_VERSION: 30.0.1
 
 jobs:
   check:
     name: fmt, clippy, test, wasm build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -26,24 +23,34 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      # default features pull in a keyring that needs system dbus; builds don't need it
-      - name: Install Stellar CLI
-        run: cargo install --locked stellar-cli@30.0.1 --no-default-features
-
-      - name: Format
+      - name: Format check
         run: cargo fmt --all -- --check
 
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
-      - name: Test
+      - name: Tests (unit + integration against OZ account wasm fixture)
         run: cargo test --workspace
 
-      - name: Build wasm
-        run: stellar contract build
+      - name: Check SECURITY.md test references
+        run: node scripts/check-security-tests.mjs
 
-      - name: Verify fixture hashes
+      - name: Verify test fixture hashes match SPEC.md
+        run: sha256sum -c tests/fixtures/SHA256SUMS
+
+      - name: Cache stellar-cli
+        id: stellar-cache
+        uses: actions/cache@v5
+        with:
+          path: ~/.cargo/bin/stellar
+          key: stellar-cli-${{ runner.os }}-${{ env.STELLAR_CLI_VERSION }}
+
+      - name: Install stellar-cli
+        if: steps.stellar-cache.outputs.cache-hit != 'true'
+        run: cargo install --locked stellar-cli@${STELLAR_CLI_VERSION} --no-default-features
+
+      - name: Build contract WASMs
         run: |
-          echo "c514d35ea67eaea9bfc1fb3327854c0c06111bc1ddebd4fe217c504c1004b9e1  tests/fixtures/oz_smart_account_v0_8_0.wasm" | sha256sum -c
-          echo "60e8798db610bdaf3370d39ebda56ee1dc2c15ce1c3a9e28b528bfa24a06b477  tests/fixtures/oz_ed25519_verifier.wasm" | sha256sum -c
-          echo "e63a030d0f1a1481e36059a4837c433083b33e704c1f9625b7314795b6d72b76  tests/fixtures/oz_webauthn_verifier.wasm" | sha256sum -c
+          stellar contract build
+          ls -lh target/wasm32v1-none/release/fosay_mandate_policy.wasm
+          ls -lh target/wasm32v1-none/release/fosay_approvals.wasm

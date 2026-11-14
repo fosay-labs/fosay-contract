@@ -26,10 +26,11 @@ changes are reviewed for safety first and features second.
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
+node scripts/check-security-tests.mjs
 stellar contract build
 ```
 
-Run all four and paste the real output in your PR.
+Run all five and paste the real output in your PR.
 
 ## Rules for changes
 
